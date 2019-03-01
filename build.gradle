@@ -1,0 +1,122 @@
+buildscript {
+    repositories {
+        mavenCentral()
+    }
+}
+
+plugins {
+    id 'jvm-component'
+    id 'java-lang'
+    id 'cpp'
+    id 'maven-publish'
+    id 'org.bven.jniplugin' version '0.0.5'
+}
+
+
+version = '0.0.1'
+group = 'org.openrndr.opendmx'
+
+// Process resources task doesn't get created if there aren't any resources; create a placeholder to ensure that it does.
+def placeholder = file('src/main/resources/deleteme')
+if (!placeholder.parentFile.exists()) {
+    placeholder.parentFile.mkdirs()
+}
+if (!placeholder.exists()) {
+    placeholder.createNewFile()
+}
+placeholder.deleteOnExit()
+
+
+apply plugin: 'maven-publish'
+
+model {
+
+
+    platforms {
+        ['windows','macOS'].each { os ->
+            ['x64'].each { arch ->
+                "$os-$arch" {
+                    architecture arch
+                    operatingSystem os
+                }
+            }
+        }
+    }
+
+
+    components {
+        main(JvmLibrarySpec) {
+
+
+        }
+
+        'native'(JNILibrarySpec) { jniLibSpec ->
+            library "main"
+            nativeClass "org.openrndr.opendmx.Native"
+
+            $.platforms.all {
+                jniLibSpec.targetPlatform it.name
+            }
+
+            binaries.all {
+                lib new JNIDependency(project)
+                cppCompiler.args "-I${project.projectDir}/../../include"
+                //linker.args "-L${project.projectDir}/../../"
+
+                if (targetPlatform.operatingSystem.macOsX) {
+                    cppCompiler.args "-I${project.projectDir}/../../include"
+                    linker.args "${project.projectDir}/../../build/Debug/librealsense2.dylib"
+                }
+
+                if (targetPlatform.operatingSystem.windows) {
+
+                    // https://github.com/couchbase/couchbase-lite-java-native/issues/23
+                    //cppCompiler.args "/IC:/Program Files (x86)/Windows Kits/10/Include/10.0.10586.0/ucrt"
+                    def arch = {
+                        if (targetPlatform.architecture.name.contains('arm')) {
+                            'arm'
+                        } else if (targetPlatform.architecture.name.contains('64')) {
+                            'x64'
+                        } else {
+                            'x86'
+                        }
+                    }()
+
+//                    linker.args "/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.10586.0/ucrt/${arch}"
+                    cppCompiler.args "-I${project.projectDir}/src/native/deps/ftd2xx/win64"
+                    //linker.args "-lrealsense2"
+
+                    linker.args "/LIBPATH:${project.projectDir}/src/native/deps/ftd2xx/win64"
+                    linker.args "ftd2xx.lib"
+                }
+            }
+        }
+    }
+
+
+    tasks {
+        run(JavaExec) {
+            def compile = $.tasks.compileMainJarMainJava;
+            def jar = $.tasks.createMainJar;
+            dependsOn $.tasks.mainJar
+            classpath compile.classpath
+            classpath jar.outputs
+            main = 'org.librealsense.Native'
+        }
+
+        wrapper {
+            gradleVersion = '4.7'
+        }
+    }
+
+    publishing {
+        publications {
+            impl(MavenPublication) {
+                groupId 'org.openrndr.opendmx'
+                artifactId 'opendmx-jvm'
+                artifact $.tasks.createMainJar
+            }
+        }
+    }
+}
+
